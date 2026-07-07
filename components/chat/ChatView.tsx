@@ -1,0 +1,242 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import type { Citation, Message, Scope } from "@/lib/types";
+import { api } from "@/lib/api";
+import { ChatInput } from "@/components/chat/ChatInput";
+import { MessageItem } from "@/components/chat/MessageItem";
+import { ScopeChips } from "@/components/chat/ScopeChips";
+import { SuggestionCards } from "@/components/chat/SuggestionCards";
+import { SourcePanel } from "@/components/reader/SourcePanel";
+import { VoiceMode } from "@/components/orb/VoiceMode";
+import { Spinner } from "@/components/ui";
+
+const DEFAULT_SCOPE: Scope = { type: "all", label: "كل مستندات المكتب" };
+
+export function ChatView({
+  initialScope,
+  initialThreadId,
+  autoSendText,
+}: {
+  initialScope?: Scope;
+  initialThreadId?: string;
+  autoSendText?: string;
+}) {
+  const [scope, setScope] = useState<Scope>(initialScope ?? DEFAULT_SCOPE);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [live, setLive] = useState<Message | null>(null);
+  const [working, setWorking] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [loadingThread, setLoadingThread] = useState(!!initialThreadId);
+  const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const busyRef = useRef(false);
+  const autoSentRef = useRef(false);
+
+  // reopen an existing conversation (from history / case threads)
+  useEffect(() => {
+    if (!initialThreadId) return;
+    let alive = true;
+    api.assistant.getThread(initialThreadId).then((t) => {
+      if (!alive) return;
+      if (t) {
+        setMessages(t.messages);
+        setScope(t.scope);
+      }
+      setLoadingThread(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [initialThreadId]);
+
+  useEffect(() => {
+    if (initialScope) setScope(initialScope);
+  }, [initialScope]);
+
+  const scrollDown = () =>
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+
+  const send = useCallback(
+    async (text: string) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+
+      const userMsg: Message = {
+        id: `u-${Date.now()}`,
+        threadId: initialThreadId ?? "new",
+        role: "user",
+        content: text,
+        reasoningSteps: [],
+        citations: [],
+        createdAt: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+
+      const draft: Message = {
+        id: `a-${Date.now()}`,
+        threadId: userMsg.threadId,
+        role: "assistant",
+        content: "",
+        reasoningSteps: [],
+        citations: [],
+        createdAt: new Date().toISOString(),
+      };
+      setLive(draft);
+      setWorking(true);
+      setStreaming(false);
+      requestAnimationFrame(scrollDown);
+
+      let acc = draft;
+      for await (const ev of api.assistant.sendMessage({ scope, content: text })) {
+        if (ev.type === "reasoning_step") {
+          acc = { ...acc, reasoningSteps: [...acc.reasoningSteps, ev.step] };
+          setLive(acc);
+        } else if (ev.type === "reasoning_done") {
+          // collapse happens when the first token lands
+        } else if (ev.type === "token") {
+          if (!acc.content) {
+            setWorking(false);
+            setStreaming(true);
+          }
+          acc = { ...acc, content: acc.content + ev.text };
+          setLive(acc);
+        } else if (ev.type === "citation") {
+          acc = { ...acc, citations: [...acc.citations, ev.citation] };
+          setLive(acc);
+        } else if (ev.type === "done") {
+          acc = { ...ev.message, id: acc.id, reasoningSteps: acc.reasoningSteps };
+          setMessages((prev) => [...prev, acc]);
+          setLive(null);
+          setWorking(false);
+          setStreaming(false);
+        }
+      }
+      busyRef.current = false;
+    },
+    [scope, initialThreadId]
+  );
+
+  // pre-filled question from a case page / suggestion deep link
+  useEffect(() => {
+    if (autoSendText && !autoSentRef.current && !loadingThread) {
+      autoSentRef.current = true;
+      void send(autoSendText);
+    }
+  }, [autoSendText, loadingThread, send]);
+
+  useEffect(() => {
+    if (live) scrollDown();
+  }, [live]);
+
+  const handleVoiceEnd = (voiceMessages: Message[]) => {
+    setVoiceOpen(false);
+    if (voiceMessages.length > 0) {
+      setMessages((prev) => [...prev, ...voiceMessages]);
+      requestAnimationFrame(scrollDown);
+    }
+  };
+
+  const empty = messages.length === 0 && !live && !loadingThread;
+  const panelOpen = !!activeCitation;
+
+  return (
+    <div className="relative min-h-screen">
+      {/* chat column compresses when the source panel opens */}
+      <div
+        className={`transition-[padding] duration-300 ease-out ${
+          panelOpen ? "md:pl-[55vw]" : ""
+        }`}
+      >
+        <div className="relative mx-auto flex min-h-screen w-full max-w-[860px] flex-col px-6 max-md:px-4">
+          {loadingThread && (
+            <div className="flex flex-1 items-center justify-center">
+              <Spinner className="h-6 w-6" />
+            </div>
+          )}
+
+          {empty && (
+            <div className="flex flex-1 flex-col justify-center pb-24 pt-16">
+              <h1 className="mb-10 text-center text-page font-semibold text-ink">
+                بمَ يمكنني مساعدتك؟
+              </h1>
+              <motion.div layoutId="voice-morph">
+                <ChatInput onSend={send} onMic={() => setVoiceOpen(true)} autoFocus />
+              </motion.div>
+              <div className="mt-4">
+                <ScopeChips scope={scope} onChange={setScope} />
+              </div>
+              <div className="mt-12">
+                <SuggestionCards onPick={send} />
+              </div>
+            </div>
+          )}
+
+          {!empty && !loadingThread && (
+            <>
+              <div className="flex-1 space-y-8 pb-44 pt-10">
+                {messages.map((m) => (
+                  <MessageItem
+                    key={m.id}
+                    message={m}
+                    onCitationClick={setActiveCitation}
+                  />
+                ))}
+                {live && (
+                  <MessageItem
+                    message={live}
+                    working={working}
+                    streaming={streaming}
+                    onCitationClick={setActiveCitation}
+                  />
+                )}
+                <div ref={bottomRef} />
+              </div>
+
+              {/* docked input */}
+              <div
+                className={`fixed bottom-0 left-0 z-20 transition-[padding] duration-300 ease-out md:right-16 xl:right-60 max-md:right-0 ${
+                  panelOpen ? "md:pl-[55vw]" : ""
+                }`}
+              >
+                <div className="mx-auto w-full max-w-[860px] px-6 pb-5 max-md:px-4">
+                  <div className="rounded-card bg-bg/80 pt-2 backdrop-blur">
+                    {!voiceOpen && (
+                      <motion.div layoutId="voice-morph">
+                        <ChatInput
+                          onSend={send}
+                          onMic={() => setVoiceOpen(true)}
+                          disabled={working || streaming}
+                        />
+                      </motion.div>
+                    )}
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <ScopeChips scope={scope} onChange={setScope} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          <AnimatePresence>
+            {voiceOpen && (
+              <VoiceMode onEnd={handleVoiceEnd} onCitationClick={setActiveCitation} />
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {activeCitation && (
+          <SourcePanel
+            citation={activeCitation}
+            onClose={() => setActiveCitation(null)}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
