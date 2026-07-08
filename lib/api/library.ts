@@ -3,43 +3,41 @@ import type {
   LegalDocument,
   LibraryNode,
 } from "@/lib/types";
-import {
-  ALL_DOCUMENTS,
-  LIBRARY_DOCUMENTS,
-  LIBRARY_TREE,
-  getDocumentContent,
-} from "@/lib/data/documents";
-import { delay, jitter } from "@/lib/api/latency";
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
 // @backend: GET /api/v1/library/tree — Response: LibraryNode[].
+// Real data: laws from dataflare/egypt-legal-corpus, grouped by category.
 export async function tree(): Promise<LibraryNode[]> {
-  await delay(jitter(300));
-  return LIBRARY_TREE;
+  const res = await fetch(`${API_BASE}/api/v1/library/tree`);
+  return res.ok ? ((await res.json()) as LibraryNode[]) : [];
 }
 
 // @backend: GET /api/v1/library/documents?query=&kind= — Response:
-// Paginated<LegalDocument>.
+// Paginated<LegalDocument> (this demo returns a bare array).
 export async function search(
   query: string,
-  kind?: string
+  kind?: string,
 ): Promise<LegalDocument[]> {
-  await delay(jitter(300));
-  return LIBRARY_DOCUMENTS.filter(
-    (d) => (!query || d.name.includes(query)) && (!kind || d.kind === kind)
-  );
+  const params = new URLSearchParams();
+  if (query) params.set("query", query);
+  if (kind) params.set("kind", kind);
+  const res = await fetch(`${API_BASE}/api/v1/library/documents?${params}`);
+  return res.ok ? ((await res.json()) as LegalDocument[]) : [];
 }
 
 // @backend: GET /api/v1/documents/:id — Response: LegalDocument.
 export async function getDocument(id: string): Promise<LegalDocument | null> {
-  await delay(jitter(200));
-  return ALL_DOCUMENTS.find((d) => d.id === id) ?? null;
+  const res = await fetch(`${API_BASE}/api/v1/documents/${encodeURIComponent(id)}`);
+  return res.ok ? ((await res.json()) as LegalDocument | null) : null;
 }
 
-// @backend: GET /api/v1/documents/:id/content?from=&to= — Response:
-// DocumentContent. Real backend returns rendered page images + text layers;
-// the mock returns styled text pages. Page payload must include the char
-// offsets stored per chunk so citation highlights can be applied client-side.
+// @backend: GET /api/v1/documents/:id/content — Response: DocumentContent.
+// One continuous page: paragraphs are the law's articles (مادة N).
 export async function getContent(id: string): Promise<DocumentContent | null> {
-  await delay(jitter(400));
-  return getDocumentContent(id);
+  const res = await fetch(
+    `${API_BASE}/api/v1/documents/${encodeURIComponent(id)}/content`,
+  );
+  return res.ok ? ((await res.json()) as DocumentContent | null) : null;
 }

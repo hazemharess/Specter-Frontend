@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Keyboard, MicOff, Mic, X } from "lucide-react";
-import type { Citation, Message, ReasoningStep, VoiceTranscriptEvent } from "@/lib/types";
+import type { Citation, Message, ReasoningStep, Scope } from "@/lib/types";
 import { api } from "@/lib/api";
 import { OrbState, VoiceOrb } from "@/components/orb/VoiceOrb";
 import { ReasoningSteps } from "@/components/chat/ReasoningSteps";
 import { MessageContent } from "@/components/chat/MessageContent";
+import { SourcesRow } from "@/components/chat/MessageItem";
 
 interface TranscriptTurn {
   role: "user" | "assistant";
@@ -17,11 +18,27 @@ interface TranscriptTurn {
   citations: Citation[];
 }
 
+/** Voice always asks over the full corpus, same as the default text scope. */
+const VOICE_SCOPE: Scope = { type: "all", label: "كل المصادر" };
+
+/** Immutable update of the last assistant turn. */
+function updateLastAssistant(
+  prev: TranscriptTurn[],
+  fn: (a: TranscriptTurn) => TranscriptTurn,
+): TranscriptTurn[] {
+  const next = [...prev];
+  const last = next[next.length - 1];
+  if (last && last.role === "assistant") next[next.length - 1] = fn(last);
+  return next;
+}
+
 /**
  * Full voice session UI: orb + live transcript + controls.
- * Pull-based consumption of the mock voice generator lets the UI pause at
- * "listening" boundaries until the user taps the orb to "speak" —
- * the same pacing hooks a real websocket session would expose.
+ *
+ * Real browser-native voice: the mic is captured with the SpeechRecognition
+ * API (ar-EG), the recognised utterance is sent through the SAME real
+ * `api.assistant.sendMessage` SSE path as text chat, and the answer is spoken
+ * back with speechSynthesis. Orb states: listening → thinking → speaking → idle.
  */
 export function VoiceMode({
   onEnd,
@@ -36,112 +53,313 @@ export function VoiceMode({
   const [awaitingTap, setAwaitingTap] = useState(true);
   const [muted, setMuted] = useState(false);
   const [ended, setEnded] = useState(false);
-  const genRef = useRef<AsyncGenerator<VoiceTranscriptEvent> | null>(null);
-  const pumpingRef = useRef(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [supported, setSupported] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    genRef.current = api.voice.startSession();
-  }, []);
+  const recognitionRef = useRef<any>(null);
+  const pendingUserRef = useRef("");
+  const busyRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns]);
 
-  const pump = useCallback(async () => {
-    if (pumpingRef.current || !genRef.current) return;
-    pumpingRef.current = true;
-    let sawListening = false;
-    while (true) {
-      const { value, done } = await genRef.current.next();
-      if (done || !value) break;
-      const ev = value;
-      if (ev.type === "state") {
-        setOrbState(ev.state);
-        if (ev.state === "listening") {
-          if (sawListening) continue;
-          sawListening = true;
-          continue;
-        }
-      } else if (ev.type === "user_partial") {
-        setTurns((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "user" && !last.final) {
-            next[next.length - 1] = { ...last, text: ev.text };
-          } else {
-            next.push({ role: "user", text: ev.text, final: false, reasoning: [], citations: [] });
-          }
-          return next;
-        });
-      } else if (ev.type === "user_final") {
-        setTurns((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "user") {
-            next[next.length - 1] = { ...last, text: ev.text, final: true };
-          }
-          return next;
-        });
-      } else if (ev.type === "reasoning_step") {
-        setTurns((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "assistant" && !last.final) {
-            next[next.length - 1] = { ...last, reasoning: [...last.reasoning, ev.step] };
-          } else {
-            next.push({ role: "assistant", text: "", final: false, reasoning: [ev.step], citations: [] });
-          }
-          return next;
-        });
-      } else if (ev.type === "assistant_token") {
-        setTurns((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "assistant" && !last.final) {
-            next[next.length - 1] = { ...last, text: last.text + ev.text };
-          } else {
-            next.push({ role: "assistant", text: ev.text, final: false, reasoning: [], citations: [] });
-          }
-          return next;
-        });
-      } else if (ev.type === "citation") {
-        setTurns((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "assistant") {
-            next[next.length - 1] = { ...last, citations: [...last.citations, ev.citation] };
-          }
-          return next;
-        });
-      } else if (ev.type === "assistant_final") {
-        setTurns((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "assistant") {
-            next[next.length - 1] = { ...last, final: true };
-          }
-          return next;
-        });
-        // assistant finished — pause until the user taps to speak again
-        setAwaitingTap(true);
-        break;
-      } else if (ev.type === "session_end") {
-        setEnded(true);
-        setOrbState("idle");
-        break;
+  // ---- transcript helpers -------------------------------------------------
+  const updateUserPartial = useCallback((text: string) => {
+    setTurns((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && last.role === "user" && !last.final) {
+        next[next.length - 1] = { ...last, text };
+      } else {
+        next.push({ role: "user", text, final: false, reasoning: [], citations: [] });
       }
-    }
-    pumpingRef.current = false;
+      return next;
+    });
   }, []);
 
+  const finalizeUser = useCallback((text: string) => {
+    setTurns((prev) => {
+      const next = [...prev];
+      const last = next[next.length - 1];
+      if (last && last.role === "user") {
+        next[next.length - 1] = { ...last, text, final: true };
+      } else {
+        next.push({ role: "user", text, final: true, reasoning: [], citations: [] });
+      }
+      return next;
+    });
+  }, []);
+
+  // ---- speaking + dictation -----------------------------------------------
+  const goIdle = useCallback(() => {
+    setOrbState("idle");
+    setAwaitingTap(true);
+  }, []);
+
+  /** Reveal the answer up to `frac` (0..1) of its words — the "dictation". */
+  const revealTo = useCallback((words: string[], frac: number) => {
+    const show = Math.max(1, Math.ceil(Math.min(1, Math.max(0, frac)) * words.length));
+    setTurns((prev) =>
+      updateLastAssistant(prev, (a) => ({ ...a, text: words.slice(0, show).join(" ") })),
+    );
+  }, []);
+
+  /** Fallback voice: browser speechSynthesis (only if ElevenLabs is down). */
+  const fallbackSpeak = useCallback(
+    (content: string, words: string[]) => {
+      const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
+      const ttsText = content.replace(/\[cite:\d+\]/g, "").trim();
+      const finish = () => {
+        setTurns((prev) =>
+          updateLastAssistant(prev, (a) => ({ ...a, text: content, final: true })),
+        );
+        goIdle();
+      };
+      if (!synth || !ttsText) {
+        finish();
+        return;
+      }
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(ttsText);
+      const arVoice = synth
+        .getVoices()
+        .find((v) => v.lang?.toLowerCase().startsWith("ar"));
+      u.lang = arVoice?.lang || "ar-EG";
+      if (arVoice) u.voice = arVoice;
+      u.onstart = () => {
+        setOrbState("speaking");
+        // browser word-boundary timing is unreliable → reveal in full
+        revealTo(words, 1);
+      };
+      u.onend = finish;
+      u.onerror = finish;
+      synth.speak(u);
+    },
+    [goIdle, revealTo],
+  );
+
+  /**
+   * Primary: fetch the ElevenLabs audio, then reveal the text word-by-word in
+   * sync with playback so the voice appears to dictate it. The orb stays on
+   * "thinking" (looping) until the audio actually starts.
+   */
+  const speakAndDictate = useCallback(
+    async (content: string, citations: Citation[]) => {
+      const words = content.trim().split(/\s+/).filter(Boolean);
+      // Bind citations up front so [cite:N] markers resolve as they surface.
+      setTurns((prev) =>
+        updateLastAssistant(prev, (a) => ({ ...a, citations, text: "" })),
+      );
+      if (words.length === 0) {
+        goIdle();
+        return;
+      }
+
+      const ttsText = content.replace(/\[cite:\d+\]/g, "").trim();
+      try {
+        const blob = await api.voice.synthesize(ttsText);
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onplay = () => setOrbState("speaking");
+        audio.ontimeupdate = () => {
+          const d = audio.duration;
+          if (d && isFinite(d)) revealTo(words, audio.currentTime / d);
+        };
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          setTurns((prev) =>
+            updateLastAssistant(prev, (a) => ({ ...a, text: content, final: true })),
+          );
+          goIdle();
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          fallbackSpeak(content, words);
+        };
+        await audio.play();
+      } catch {
+        // key missing / server down / autoplay blocked → browser TTS
+        fallbackSpeak(content, words);
+      }
+    },
+    [goIdle, revealTo, fallbackSpeak],
+  );
+
+  // ---- ask the real assistant (shared path with text chat) ----------------
+  const answer = useCallback(
+    async (userText: string) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setOrbState("thinking");
+      // Orb loops on "thinking"; the ANSWER stays hidden until the voice speaks.
+      setTurns((prev) => [
+        ...prev,
+        { role: "assistant", text: "", final: false, reasoning: [], citations: [] },
+      ]);
+
+      let finalMsg: Message | null = null;
+      try {
+        for await (const ev of api.assistant.sendMessage({
+          scope: VOICE_SCOPE,
+          content: userText,
+        })) {
+          if (ev.type === "reasoning_step") {
+            setTurns((prev) =>
+              updateLastAssistant(prev, (a) => ({
+                ...a,
+                reasoning: [...a.reasoning, ev.step],
+              })),
+            );
+          } else if (ev.type === "done") {
+            finalMsg = ev.message;
+          }
+          // tokens & citations are intentionally NOT displayed while generating;
+          // the answer is dictated in sync with the voice below.
+        }
+      } catch {
+        setTurns((prev) =>
+          updateLastAssistant(prev, (a) => ({
+            ...a,
+            text: "تعذّر الاتصال بالخادم. تأكد من تشغيل الخدمة الخلفية.",
+            final: true,
+          })),
+        );
+        busyRef.current = false;
+        goIdle();
+        return;
+      }
+
+      busyRef.current = false;
+      const msg = finalMsg;
+      if (!msg || !msg.content) {
+        goIdle();
+        return;
+      }
+      setTurns((prev) =>
+        updateLastAssistant(prev, (a) => ({
+          ...a,
+          reasoning: msg.reasoningSteps ?? a.reasoning,
+        })),
+      );
+      await speakAndDictate(msg.content, msg.citations ?? []);
+    },
+    [goIdle, speakAndDictate],
+  );
+
+  // ---- mic capture (SpeechRecognition) ------------------------------------
+  useEffect(() => {
+    const SR =
+      typeof window !== "undefined"
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null;
+
+    if (!SR) {
+      setSupported(false);
+      setAwaitingTap(false);
+      setNotice(
+        "التعرّف على الصوت غير مدعوم في هذا المتصفح. استخدم Chrome، أو عُد إلى الكتابة.",
+      );
+      return;
+    }
+
+    // Warm the voice list (Chrome populates it asynchronously).
+    window.speechSynthesis?.getVoices();
+
+    const rec = new SR();
+    rec.lang = "ar-EG";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+
+    rec.onresult = (e: any) => {
+      let interim = "";
+      let finalTxt = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalTxt += t;
+        else interim += t;
+      }
+      if (finalTxt) pendingUserRef.current = finalTxt.trim();
+      updateUserPartial((finalTxt || interim).trim());
+    };
+
+    rec.onerror = (e: any) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setNotice("لم يُمنح إذن الميكروفون. اسمح بالوصول إليه ثم أعد المحاولة.");
+      } else if (e.error === "no-speech") {
+        setNotice("لم يُلتقط أي كلام. اضغط على الكرة وتحدّث.");
+      }
+      setOrbState("idle");
+      setAwaitingTap(true);
+    };
+
+    rec.onend = () => {
+      const text = pendingUserRef.current.trim();
+      pendingUserRef.current = "";
+      if (text) {
+        finalizeUser(text);
+        void answer(text);
+      } else {
+        setOrbState("idle");
+        setAwaitingTap(true);
+      }
+    };
+
+    recognitionRef.current = rec;
+    return () => {
+      try {
+        rec.stop();
+      } catch {
+        /* not started */
+      }
+      audioRef.current?.pause();
+      if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    };
+  }, [updateUserPartial, finalizeUser, answer]);
+
+  // ---- controls -----------------------------------------------------------
   const handleOrbTap = () => {
-    if (!awaitingTap || ended) return;
+    if (ended || !supported || busyRef.current || !awaitingTap) return;
+    if (muted) {
+      setNotice("الميكروفون مكتوم. ألغِ الكتم للتحدث.");
+      return;
+    }
+    setNotice(null);
+    pendingUserRef.current = "";
     setAwaitingTap(false);
-    void pump();
+    setOrbState("listening");
+    try {
+      recognitionRef.current?.start();
+    } catch {
+      /* already running */
+    }
   };
 
+  const toggleMute = () =>
+    setMuted((v) => {
+      const next = !v;
+      if (next) {
+        try {
+          recognitionRef.current?.stop();
+        } catch {
+          /* not started */
+        }
+      }
+      return next;
+    });
+
   const finish = () => {
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* not started */
+    }
+    audioRef.current?.pause();
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
     const messages: Message[] = turns
       .filter((t) => t.final)
       .map((t, i) => ({
@@ -179,16 +397,21 @@ export function VoiceMode({
         <p className="text-label text-ink-3" aria-live="polite">
           {ended
             ? "انتهت الجلسة الصوتية"
-            : awaitingTap
-              ? "اضغط على الكرة للتحدث"
-              : orbState === "listening"
-                ? "جارٍ الاستماع…"
-                : orbState === "thinking"
-                  ? "جارٍ التفكير…"
-                  : orbState === "speaking"
-                    ? "جارٍ التحدث…"
-                    : ""}
+            : !supported
+              ? "الوضع الصوتي غير مدعوم في هذا المتصفح"
+              : awaitingTap
+                ? "اضغط على الكرة للتحدث"
+                : orbState === "listening"
+                  ? "جارٍ الاستماع…"
+                  : orbState === "thinking"
+                    ? "جارٍ التفكير…"
+                    : orbState === "speaking"
+                      ? "جارٍ التحدث…"
+                      : ""}
         </p>
+        {notice && (
+          <p className="max-w-[340px] text-center text-label text-danger">{notice}</p>
+        )}
       </motion.div>
 
       {/* live transcript */}
@@ -219,6 +442,9 @@ export function VoiceMode({
                     />
                   </div>
                 )}
+                {t.final && (
+                  <SourcesRow citations={t.citations} onCitationClick={onCitationClick} />
+                )}
               </div>
             )
           )}
@@ -229,7 +455,7 @@ export function VoiceMode({
       {/* controls */}
       <div className="absolute bottom-8 flex items-center gap-3">
         <button
-          onClick={() => setMuted((v) => !v)}
+          onClick={toggleMute}
           aria-label={muted ? "إلغاء كتم الميكروفون" : "كتم الميكروفون"}
           aria-pressed={muted}
           className={`flex h-11 w-11 items-center justify-center rounded-full border transition-colors duration-150 ${

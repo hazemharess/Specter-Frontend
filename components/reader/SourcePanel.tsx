@@ -15,6 +15,12 @@ import { toArabicDigits } from "@/components/chat/MessageContent";
  * from the left edge of the screen in RTL); the chat column compresses
  * beside it and stays interactive. Full-screen sheet on mobile.
  */
+/** Pull the article number out of the cited snippet ("مادة N …") for the header. */
+function articleLabel(snippet: string): string | null {
+  const m = snippet.match(/مادة\s+(\d+)/);
+  return m ? `مادة ${toArabicDigits(Number(m[1]))}` : null;
+}
+
 export function SourcePanel({
   citation,
   onClose,
@@ -23,16 +29,23 @@ export function SourcePanel({
   onClose: () => void;
 }) {
   const [content, setContent] = useState<DocumentContent | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "empty">("loading");
   const [pageNum, setPageNum] = useState(citation.page);
   const reduce = useReducedMotion();
 
   useEffect(() => {
     let alive = true;
     setContent(null);
+    setStatus("loading");
     setPageNum(citation.page);
-    api.library.getContent(citation.docId).then((c) => {
-      if (alive) setContent(c);
-    });
+    api.library
+      .getContent(citation.docId)
+      .then((c) => {
+        if (!alive) return;
+        setContent(c);
+        setStatus(c && c.pages.length ? "ready" : "empty");
+      })
+      .catch(() => alive && setStatus("empty"));
     return () => {
       alive = false;
     };
@@ -45,7 +58,11 @@ export function SourcePanel({
   }, [onClose]);
 
   const total = content?.pages.length ?? 0;
-  const page = content?.pages.find((p) => p.page === pageNum) ?? null;
+  // The document is one continuous page; fall back to the first page so the
+  // citation always renders even though citation.page is a locator, not an index.
+  const page =
+    content?.pages.find((p) => p.page === pageNum) ?? content?.pages[0] ?? null;
+  const article = articleLabel(citation.snippet);
 
   return (
     <motion.section
@@ -68,9 +85,7 @@ export function SourcePanel({
         </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-body font-medium text-ink">{citation.docName}</p>
-          <p className="text-label text-ink-3">
-            صفحة {toArabicDigits(pageNum)} من {toArabicDigits(total || citation.page)}
-          </p>
+          <p className="text-label text-ink-3">{article ?? "مصدر قانوني"}</p>
         </div>
         <Link
           href={`/library?doc=${citation.docId}`}
@@ -83,41 +98,45 @@ export function SourcePanel({
 
       {/* body */}
       <div className="flex-1 overflow-y-auto bg-[#efeeea] p-6 max-md:p-3">
-        {!content && (
+        {status === "loading" && (
           <div className="flex h-full items-center justify-center">
             <Spinner className="h-6 w-6" />
           </div>
         )}
-        {page && (
-          <PdfPage
-            page={page}
-            highlightSnippet={pageNum === citation.page ? citation.snippet : null}
-          />
+        {status === "empty" && (
+          <div className="flex h-full items-center justify-center px-6 text-center text-label text-ink-3">
+            تعذّر تحميل المستند المصدر.
+          </div>
+        )}
+        {status === "ready" && page && (
+          <PdfPage page={page} highlightSnippet={citation.snippet} />
         )}
       </div>
 
-      {/* pager — mirrored for RTL: previous is to the right */}
-      <footer className="flex items-center justify-center gap-4 border-t border-line bg-surface py-2.5">
-        <button
-          onClick={() => setPageNum((p) => Math.max(1, p - 1))}
-          disabled={!content || pageNum <= 1}
-          aria-label="الصفحة السابقة"
-          className="rounded-input p-2 text-ink-2 transition-colors duration-150 hover:bg-accent-soft/40 disabled:opacity-30"
-        >
-          <ChevronRight className="h-[18px] w-[18px]" strokeWidth={1.5} />
-        </button>
-        <span className="min-w-16 text-center text-label text-ink-2">
-          {toArabicDigits(pageNum)} / {toArabicDigits(total)}
-        </span>
-        <button
-          onClick={() => setPageNum((p) => Math.min(total, p + 1))}
-          disabled={!content || pageNum >= total}
-          aria-label="الصفحة التالية"
-          className="rounded-input p-2 text-ink-2 transition-colors duration-150 hover:bg-accent-soft/40 disabled:opacity-30"
-        >
-          <ChevronLeft className="h-[18px] w-[18px]" strokeWidth={1.5} />
-        </button>
-      </footer>
+      {/* pager — only meaningful for multi-page docs */}
+      {total > 1 && (
+        <footer className="flex items-center justify-center gap-4 border-t border-line bg-surface py-2.5">
+          <button
+            onClick={() => setPageNum((p) => Math.max(1, p - 1))}
+            disabled={pageNum <= 1}
+            aria-label="الصفحة السابقة"
+            className="rounded-input p-2 text-ink-2 transition-colors duration-150 hover:bg-accent-soft/40 disabled:opacity-30"
+          >
+            <ChevronRight className="h-[18px] w-[18px]" strokeWidth={1.5} />
+          </button>
+          <span className="min-w-16 text-center text-label text-ink-2">
+            {toArabicDigits(pageNum)} / {toArabicDigits(total)}
+          </span>
+          <button
+            onClick={() => setPageNum((p) => Math.min(total, p + 1))}
+            disabled={pageNum >= total}
+            aria-label="الصفحة التالية"
+            className="rounded-input p-2 text-ink-2 transition-colors duration-150 hover:bg-accent-soft/40 disabled:opacity-30"
+          >
+            <ChevronLeft className="h-[18px] w-[18px]" strokeWidth={1.5} />
+          </button>
+        </footer>
+      )}
     </motion.section>
   );
 }

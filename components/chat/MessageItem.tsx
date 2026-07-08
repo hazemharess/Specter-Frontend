@@ -5,6 +5,12 @@ import type { Citation, Message } from "@/lib/types";
 import { MessageContent, toArabicDigits } from "@/components/chat/MessageContent";
 import { ReasoningSteps } from "@/components/chat/ReasoningSteps";
 
+/** Pull the article number out of a citation snippet ("مادة N …") for display. */
+function articleLabel(snippet: string): string | null {
+  const m = snippet.match(/مادة\s+(\d+)/);
+  return m ? `مادة ${toArabicDigits(Number(m[1]))}` : null;
+}
+
 export function SourcesRow({
   citations,
   onCitationClick,
@@ -17,16 +23,22 @@ export function SourcesRow({
     <div className="mt-5">
       <p className="mb-2 text-label font-medium text-ink-3">المصادر</p>
       <div className="flex flex-wrap gap-2">
-        {citations.map((c) => (
-          <button
-            key={c.id + c.index}
-            onClick={() => onCitationClick(c)}
-            className="inline-flex items-center gap-2 rounded-pill border border-gold/60 bg-surface px-3 py-1.5 text-label text-ink transition-colors duration-150 hover:bg-[var(--gold-soft)]"
-          >
-            <span className="font-semibold text-gold">﴾{toArabicDigits(c.index)}﴿</span>
-            {c.docName} — صفحة {c.page}
-          </button>
-        ))}
+        {citations.map((c) => {
+          const article = articleLabel(c.snippet);
+          return (
+            <button
+              key={c.id + c.index}
+              onClick={() => onCitationClick(c)}
+              className="inline-flex items-center gap-2 rounded-pill border border-gold/60 bg-surface px-3 py-1.5 text-label text-ink transition-colors duration-150 hover:bg-[var(--gold-soft)]"
+            >
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--gold-soft)] text-[11px] font-semibold text-gold">
+                {toArabicDigits(c.index)}
+              </span>
+              <span className="min-w-0 truncate">{c.docName}</span>
+              {article && <span className="text-ink-3">· {article}</span>}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

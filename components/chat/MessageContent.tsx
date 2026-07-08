@@ -11,8 +11,8 @@ export function toArabicDigits(n: number): string {
 }
 
 /**
- * Renders assistant text. Inline [cite:N] tokens become gold superscript
- * markers ﴾١﴿ that open the source panel.
+ * Renders assistant text. Inline [cite:N] tokens become gold, hyperlink-style
+ * superscript markers that open the source panel on the cited article.
  */
 export function MessageContent({
   content,
@@ -33,26 +33,27 @@ export function MessageContent({
             if (!m) return <span key={i}>{part}</span>;
             const index = Number(m[1]);
             const citation = citations.find((c) => c.index === index);
-            const marker = `﴾${toArabicDigits(index)}﴿`;
+            const label = toArabicDigits(index);
             if (!citation) {
-              // token streamed in before its citation event — show inert marker
+              // token streamed in before its citation event — inert placeholder
               return (
-                <span
+                <sup
                   key={i}
-                  className="relative -top-[0.4em] mx-0.5 inline-flex text-[11px] font-semibold text-gold"
+                  className="mx-0.5 text-[0.7em] font-semibold text-gold/60"
                 >
-                  {marker}
-                </span>
+                  [{label}]
+                </sup>
               );
             }
             return (
               <button
                 key={i}
                 onClick={() => onCitationClick?.(citation)}
-                aria-label={`المصدر ${toArabicDigits(index)}: ${citation.docName} — صفحة ${citation.page}`}
-                className="relative -top-[0.4em] mx-0.5 inline-flex items-center rounded px-0.5 text-[11px] font-semibold leading-4 text-gold transition-colors duration-150 hover:bg-[var(--gold-soft)]"
+                aria-label={`المصدر ${label}: ${citation.docName}`}
+                title={citation.docName}
+                className="cursor-pointer align-super text-[0.7em] font-semibold text-gold underline decoration-dotted decoration-gold/50 underline-offset-2 transition-colors duration-150 hover:decoration-gold hover:decoration-solid"
               >
-                {marker}
+                [{label}]
               </button>
             );
           })}

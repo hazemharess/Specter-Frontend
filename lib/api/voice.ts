@@ -2,6 +2,27 @@ import type { VoiceTranscriptEvent } from "@/lib/types";
 import { VOICE_SCRIPT } from "@/lib/data/voice";
 import { delay, jitter } from "@/lib/api/latency";
 
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+
+/**
+ * Text-to-speech for the voice response. POSTs to the backend ElevenLabs
+ * proxy (the API key stays server-side) and returns the mp3 audio Blob for the
+ * component to play. Throws on failure so the caller can fall back to browser
+ * speechSynthesis.
+ *
+ * @backend: POST /api/v1/voice/tts { text } → audio/mpeg
+ */
+export async function synthesize(text: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/api/v1/voice/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error(`tts failed: ${res.status}`);
+  return res.blob();
+}
+
 /**
  * Mock voice session. Yields VoiceTranscriptEvent exactly as a real
  * websocket voice agent (ElevenLabs/Vapi-style) would push them.

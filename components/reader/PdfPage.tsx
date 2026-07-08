@@ -55,7 +55,7 @@ export function PdfPage({
               para.slice(para.indexOf(highlightSnippet) + highlightSnippet.length),
             ];
             return (
-              <p key={i}>
+              <p key={i} id={`reader-p-${i}`} style={{ scrollMarginTop: "1.5rem" }}>
                 {before}
                 <mark
                   ref={highlightRef}
@@ -67,7 +67,11 @@ export function PdfPage({
               </p>
             );
           }
-          return <p key={i}>{para}</p>;
+          return (
+            <p key={i} id={`reader-p-${i}`} style={{ scrollMarginTop: "1.5rem" }}>
+              {para}
+            </p>
+          );
         })}
       </div>
 

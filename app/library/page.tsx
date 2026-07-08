@@ -50,6 +50,18 @@ function LibraryScreen() {
   const total = content?.pages.length ?? 0;
   const page = content?.pages.find((p) => p.page === pageNum) ?? null;
 
+  // TOC entries are index-aligned with the page paragraphs; jump + briefly pulse.
+  const jumpToParagraph = (i: number) => {
+    const el = document.getElementById(`reader-p-${i}`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.add("citation-highlight", "citation-highlight--pulse");
+    window.setTimeout(
+      () => el.classList.remove("citation-highlight", "citation-highlight--pulse"),
+      1300,
+    );
+  };
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* right pane: tree (first in RTL) */}
@@ -116,16 +128,13 @@ function LibraryScreen() {
                 className="w-44 shrink-0 overflow-y-auto border-l border-line bg-surface p-3 max-lg:hidden"
               >
                 <p className="mb-2 text-label font-medium text-ink-3">المحتويات</p>
-                {content.tableOfContents.map((t) => (
+                {content.tableOfContents.map((t, i) => (
                   <button
-                    key={t.label}
-                    onClick={() => setPageNum(t.page)}
-                    className={`block w-full rounded-input px-2 py-1.5 text-right text-label transition-colors duration-150 ${
-                      pageNum >= t.page ? "text-accent" : "text-ink-2"
-                    } hover:bg-accent-soft/40`}
+                    key={i}
+                    onClick={() => jumpToParagraph(i)}
+                    className="block w-full rounded-input px-2 py-1.5 text-right text-label text-ink-2 transition-colors duration-150 hover:bg-accent-soft/40 hover:text-accent"
                   >
                     {t.label}
-                    <span className="mr-1 text-ink-3">· {toArabicDigits(t.page)}</span>
                   </button>
                 ))}
               </nav>
