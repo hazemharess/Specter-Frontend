@@ -148,6 +148,16 @@ run = {
 - `slot_questions` steps carry `questions: SlotQuestion[]`; the UI asks them one at a time and PATCHes each answer, so the backend may inject follow-up questions by returning an extended list.
 - The `generate` step is `POST …/generate` and streams the same SSE protocol as the assistant (reasoning steps, no tokens needed), resolving to a `Draft`.
 - `Draft.body` contains `[[field:key]]` tokens; `Draft.fields` maps each key to a `DraftField` with `sourceType: "user_answer" | "citation"` (+ `citation` when applicable). This is what powers the gold-underline provenance popovers — the generation service must record, per filled field, where the value came from.
+- **Document studio** (`components/workflow/DocumentStudio.tsx`) edits a `Draft` entirely client-side: field edits, free-prose editing, and clause insertion all mutate local state. "حفظ في القضية" → `saveDraft` (above). Word/PDF export are client-side (`.doc` HTML blob / print window) — **no export endpoints**. If server-rendered DOCX/PDF is later wanted, add `POST /api/v1/drafts/:id/export?format=docx|pdf` returning a file; the studio's `downloadWord`/`downloadPdf` are the only call sites to swap.
+
+### Case-locked conversations
+
+Locking a chat to a case is **pure client scoping** — no new endpoint. `ChatView`
+sends `scope: { type: "case", caseId }` (or `type: "document", docId, caseId`) with
+every `sendMessage`, exactly as the §1/§2 contract already defines. The backend
+**must** constrain retrieval to that `caseId` (and to that `docId` for document
+scope) so a locked conversation never leaks cross-case material. The lock is a UX
+guarantee surfaced from that same scope field; the assistant endpoint is unchanged.
 
 ---
 

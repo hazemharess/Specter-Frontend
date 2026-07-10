@@ -6,11 +6,11 @@ import {
   Check,
   ChevronDown,
   FileText,
+  Maximize2,
   UploadCloud,
 } from "lucide-react";
 import type {
   Case,
-  Citation,
   Draft,
   ReasoningStep,
   Workflow,
@@ -18,8 +18,7 @@ import type {
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import { ReasoningSteps } from "@/components/chat/ReasoningSteps";
-import { DraftView } from "@/components/workflow/DraftView";
-import { SourcePanel } from "@/components/reader/SourcePanel";
+import { DocumentStudio } from "@/components/workflow/DocumentStudio";
 import { Button, Spinner } from "@/components/ui";
 
 interface UploadedFile {
@@ -79,7 +78,7 @@ export function WorkflowRunner({ workflow }: { workflow: Workflow }) {
   const [answerInput, setAnswerInput] = useState("");
   const [generateVisible, setGenerateVisible] = useState<ReasoningStep[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
+  const [studioOpen, setStudioOpen] = useState(false);
   const generatingRef = useRef(false);
   const reduce = useReducedMotion();
 
@@ -109,6 +108,7 @@ export function WorkflowRunner({ workflow }: { workflow: Workflow }) {
       });
       if (!cancelled) {
         setDraft(d);
+        setStudioOpen(true); // pop the full editor open automatically
         advance();
       }
     })();
@@ -306,7 +306,32 @@ export function WorkflowRunner({ workflow }: { workflow: Workflow }) {
 
       case "draft":
         return draft ? (
-          <DraftView draft={draft} onCitationClick={setActiveCitation} />
+          <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+            {/* mini document preview */}
+            <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded-[3px] border border-line bg-white p-2 shadow-raised">
+              <div className="space-y-1">
+                <div className="mx-auto h-1 w-8 rounded bg-[#d9d5cc]" />
+                {Array.from({ length: 7 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-1 rounded bg-[#e6e3dc]"
+                    style={{ width: `${70 + ((i * 13) % 30)}%` }}
+                  />
+                ))}
+                <div className="h-1 w-1/2 rounded bg-[var(--gold-soft)]" />
+              </div>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-body font-medium text-ink">{draft.title}</p>
+              <p className="mt-0.5 text-label text-ink-3">
+                جاهزة للمراجعة — افتح المحرّر لتعديل الحقول والصياغة والتنزيل بصيغة Word أو PDF.
+              </p>
+              <Button className="mt-3" onClick={() => setStudioOpen(true)}>
+                <Maximize2 className="h-4 w-4" strokeWidth={1.5} />
+                افتح محرّر المستند
+              </Button>
+            </div>
+          </div>
         ) : null;
     }
   };
@@ -383,14 +408,13 @@ export function WorkflowRunner({ workflow }: { workflow: Workflow }) {
         );
       })}
 
-      <AnimatePresence>
-        {activeCitation && (
-          <SourcePanel
-            citation={activeCitation}
-            onClose={() => setActiveCitation(null)}
-          />
-        )}
-      </AnimatePresence>
+      {/* Plain conditional (not AnimatePresence): the studio contains
+          contentEditable regions in edit mode, which make framer's exit
+          tracking hang and leave an invisible overlay blocking the page.
+          Unmounting instantly on close is correct for a full-screen editor. */}
+      {studioOpen && draft && (
+        <DocumentStudio draft={draft} onClose={() => setStudioOpen(false)} />
+      )}
     </div>
   );
 }

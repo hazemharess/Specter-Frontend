@@ -21,6 +21,7 @@ import type {
 } from "@/lib/types";
 import { api } from "@/lib/api";
 import { Badge, Spinner, formatDateAr, relativeTime } from "@/components/ui";
+import { DocumentStudio } from "@/components/workflow/DocumentStudio";
 
 const TABS = ["المحادثات", "المستندات", "المسودات", "الجلسات"] as const;
 type Tab = (typeof TABS)[number];
@@ -38,6 +39,7 @@ export default function CaseDetailPage() {
   const [tab, setTab] = useState<Tab>("المحادثات");
   const [ask, setAsk] = useState("");
   const [loading, setLoading] = useState(true);
+  const [openDraft, setOpenDraft] = useState<Draft | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -229,14 +231,18 @@ export default function CaseDetailPage() {
               initial={reduce ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, ease: "easeOut", delay: i * 0.04 }}
-              className="flex items-center gap-4 rounded-card border border-line bg-surface px-5 py-4"
             >
-              <PenLine className="h-[18px] w-[18px] shrink-0 text-ink-3" strokeWidth={1.5} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-body font-medium text-ink">{d.title}</span>
-                <span className="block text-label text-ink-3">{formatDateAr(d.createdAt)}</span>
-              </span>
-              <Badge tone="amber">مسودة</Badge>
+              <button
+                onClick={() => setOpenDraft(d)}
+                className="flex w-full items-center gap-4 rounded-card border border-line bg-surface px-5 py-4 text-right transition-colors duration-150 hover:bg-accent-soft/40"
+              >
+                <PenLine className="h-[18px] w-[18px] shrink-0 text-ink-3" strokeWidth={1.5} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-body font-medium text-ink">{d.title}</span>
+                  <span className="block text-label text-ink-3">{formatDateAr(d.createdAt)}</span>
+                </span>
+                <Badge tone="amber">مسودة</Badge>
+              </button>
             </motion.li>
           ))}
           {drafts.length === 0 && (
@@ -296,6 +302,12 @@ export default function CaseDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Plain conditional (not AnimatePresence) — see WorkflowRunner note:
+          the studio's edit-mode contentEditable hangs framer's exit tracking. */}
+      {openDraft && (
+        <DocumentStudio draft={openDraft} onClose={() => setOpenDraft(null)} />
+      )}
     </div>
   );
 }

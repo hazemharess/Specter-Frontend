@@ -2,11 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { Citation, Message, Scope } from "@/lib/types";
+import type { Case, Citation, Message, Scope } from "@/lib/types";
 import { api } from "@/lib/api";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { ScopeChips } from "@/components/chat/ScopeChips";
+import { ChatModeChooser } from "@/components/chat/ChatModeChooser";
+import {
+  LockInfo,
+  LockedScopeBanner,
+} from "@/components/chat/LockedScopeBanner";
 import { SuggestionCards } from "@/components/chat/SuggestionCards";
 import { SourcePanel } from "@/components/reader/SourcePanel";
 import { VoiceMode } from "@/components/orb/VoiceMode";
@@ -14,14 +19,30 @@ import { Spinner } from "@/components/ui";
 
 const DEFAULT_SCOPE: Scope = { type: "all", label: "كل مستندات المكتب" };
 
+export function caseLockInfo(c: Case): LockInfo {
+  return {
+    label: c.number,
+    sublabel: c.title,
+    facts: [
+      { label: "الموكل", value: c.client },
+      { label: "الخصم", value: c.opponent },
+      { label: "المحكمة", value: c.court },
+    ],
+  };
+}
+
 export function ChatView({
   initialScope,
   initialThreadId,
   autoSendText,
+  initialLocked,
+  initialLockInfo,
 }: {
   initialScope?: Scope;
   initialThreadId?: string;
   autoSendText?: string;
+  initialLocked?: boolean;
+  initialLockInfo?: LockInfo;
 }) {
   const [scope, setScope] = useState<Scope>(initialScope ?? DEFAULT_SCOPE);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -31,6 +52,22 @@ export function ChatView({
   const [loadingThread, setLoadingThread] = useState(!!initialThreadId);
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [locked, setLocked] = useState(!!initialLocked);
+  const [lockInfo, setLockInfo] = useState<LockInfo | null>(
+    initialLockInfo ?? null
+  );
+
+  const lockToCase = (c: Case) => {
+    setScope({ type: "case", caseId: c.id, label: c.number });
+    setLockInfo(caseLockInfo(c));
+    setLocked(true);
+  };
+
+  const unlock = () => {
+    setScope(DEFAULT_SCOPE);
+    setLockInfo(null);
+    setLocked(false);
+  };
   const bottomRef = useRef<HTMLDivElement>(null);
   const busyRef = useRef(false);
   const autoSentRef = useRef(false);
@@ -166,11 +203,21 @@ export function ChatView({
                 <ChatInput onSend={send} onMic={() => setVoiceOpen(true)} autoFocus />
               </motion.div>
               <div className="mt-4">
-                <ScopeChips scope={scope} onChange={setScope} />
+                {locked && lockInfo ? (
+                  <LockedScopeBanner info={lockInfo} onChange={unlock} />
+                ) : (
+                  <ChatModeChooser
+                    scope={scope}
+                    onScopeChange={setScope}
+                    onPickCase={lockToCase}
+                  />
+                )}
               </div>
-              <div className="mt-12">
-                <SuggestionCards onPick={send} />
-              </div>
+              {!locked && (
+                <div className="mt-12">
+                  <SuggestionCards onPick={send} />
+                </div>
+              )}
             </div>
           )}
 
@@ -213,7 +260,11 @@ export function ChatView({
                       </motion.div>
                     )}
                     <div className="mt-2.5 flex items-center gap-2">
-                      <ScopeChips scope={scope} onChange={setScope} />
+                      {locked && lockInfo ? (
+                        <LockedScopeBanner info={lockInfo} compact />
+                      ) : (
+                        <ScopeChips scope={scope} onChange={setScope} />
+                      )}
                     </div>
                   </div>
                 </div>

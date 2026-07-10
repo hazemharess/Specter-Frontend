@@ -18,6 +18,31 @@ interface TranscriptTurn {
   citations: Citation[];
 }
 
+// Minimal shape of the browser SpeechRecognition API (not in lib.dom types).
+interface SpeechRecognitionResultLike {
+  readonly isFinal: boolean;
+  0: { transcript: string };
+}
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+interface SpeechRecognitionErrorLike {
+  error: string;
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  maxAlternatives: number;
+  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((e: SpeechRecognitionErrorLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
 /** Voice always asks over the full corpus, same as the default text scope. */
 const VOICE_SCOPE: Scope = { type: "all", label: "كل المصادر" };
 
@@ -61,11 +86,11 @@ export function VoiceMode({
   const [turns, setTurns] = useState<TranscriptTurn[]>([]);
   const [awaitingTap, setAwaitingTap] = useState(true);
   const [muted, setMuted] = useState(false);
-  const [ended, setEnded] = useState(false);
+  const [ended] = useState(false);
   const [supported, setSupported] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const pendingUserRef = useRef("");
   const busyRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -176,7 +201,7 @@ export function VoiceMode({
         audioRef.current = audio;
         // Speed up playback; keep pitch natural. Dictation follows via ontimeupdate.
         audio.playbackRate = VOICE_SPEED;
-        (audio as any).preservesPitch = true;
+        (audio as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true;
         audio.onplay = () => setOrbState("speaking");
         audio.ontimeupdate = () => {
           const d = audio.duration;
@@ -265,10 +290,14 @@ export function VoiceMode({
 
   // ---- mic capture (SpeechRecognition) ------------------------------------
   useEffect(() => {
-    const SR =
+    const w =
       typeof window !== "undefined"
-        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        ? (window as unknown as {
+            SpeechRecognition?: SpeechRecognitionCtor;
+            webkitSpeechRecognition?: SpeechRecognitionCtor;
+          })
         : null;
+    const SR = w ? w.SpeechRecognition || w.webkitSpeechRecognition : null;
 
     if (!SR) {
       setSupported(false);
@@ -288,7 +317,7 @@ export function VoiceMode({
     rec.continuous = false;
     rec.maxAlternatives = 1;
 
-    rec.onresult = (e: any) => {
+    rec.onresult = (e: SpeechRecognitionEventLike) => {
       let interim = "";
       let finalTxt = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -300,7 +329,7 @@ export function VoiceMode({
       updateUserPartial((finalTxt || interim).trim());
     };
 
-    rec.onerror = (e: any) => {
+    rec.onerror = (e: SpeechRecognitionErrorLike) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         setNotice("لم يُمنح إذن الميكروفون. اسمح بالوصول إليه ثم أعد المحاولة.");
       } else if (e.error === "no-speech") {

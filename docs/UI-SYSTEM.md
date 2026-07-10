@@ -70,11 +70,13 @@ components/
     AppShell.tsx         layout wrapper, mobile top bar + drawer state
     Sidebar.tsx          right rail (240px → icons-only <1280px → drawer <768px)
   chat/
-    AssistantScreen.tsx  deep-link entry (?thread, ?case, ?doc, ?q, ?new)
-    ChatView.tsx         orchestrator: streaming state machine, panel compression, voice overlay
+    AssistantScreen.tsx  deep-link entry (?thread, ?case, ?doc, ?q, ?lock, ?new)
+    ChatView.tsx         orchestrator: streaming state machine, panel compression, voice overlay, case-lock state
     ChatInput.tsx        input card (attach, mic, send; Enter sends)
-    ScopeChips.tsx       scope pills + case-picker popover
-    SuggestionCards.tsx  2×2 empty-state suggestions
+    ChatModeChooser.tsx  empty-state: "محادثة عامة" vs "داخل قضية" (pick a case → lock)
+    LockedScopeBanner.tsx locked-scope banner (case facts); onChange → back to general
+    ScopeChips.tsx       scope pills + case-picker popover (general mode only)
+    SuggestionCards.tsx  2×2 empty-state suggestions (hidden when locked)
     MessageItem.tsx      user bubble / assistant document-style + SourcesRow (gold chips)
     MessageContent.tsx   [cite:N] → gold ﴾١﴿ markers; toArabicDigits
     ReasoningSteps.tsx   "جارٍ العمل…" trust block, collapses to summary line
@@ -83,8 +85,9 @@ components/
     SourcePanel.tsx      55vw split panel, RTL pager, "فتح في المكتبة"
     LibraryTree.tsx      collapsible practice-area tree + search/type filter
   workflow/
-    WorkflowRunner.tsx   vertical step column, connector draw, upload/slot/generate steps
-    DraftView.tsx        paper draft, gold-underlined fields, provenance popover + inline edit
+    WorkflowRunner.tsx   vertical step column, connector draw, upload/slot/generate steps; draft step opens the studio
+    DocumentStudio.tsx   full-screen Word-like editor: editable page, side الحقول/المساعد panel, Word/PDF export
+    DraftView.tsx        (legacy inline draft view — superseded by DocumentStudio)
   orb/
     VoiceOrb.tsx         the glass orb (only gradient in the app)
     VoiceMode.tsx        session overlay: transcript, controls, tap-to-talk pump
@@ -100,4 +103,32 @@ Routes: `/` assistant · `/cases`, `/cases/[id]` · `/workflows`,
 - Data access ONLY via `import { api } from "@/lib/api"` — never import `/lib/data/*` in a component (see BACKEND-INTEGRATION.md).
 - All user-facing strings are Arabic; ARIA labels in Arabic; Escape closes any popover/panel/overlay; Enter submits.
 - RTL: use logical layout (`pr-`/`pl-` deliberately mirrored), previous-page chevron points **right**, next points **left**.
-- Deep-linking into a scoped chat: push `/?case=<id>`, `/?doc=<id>`, optionally `&q=<question>` to auto-send.
+- Deep-linking into a scoped chat: push `/?case=<id>`, `/?doc=<id>`, optionally `&q=<question>` to auto-send; add `&lock=1` (implicit for `case`/`doc`) to lock the conversation.
+
+## 6. Case-locked conversations
+
+A conversation can be **locked** to one case (or document). Locking is purely
+client-side scoping — `ChatView` sends `scope: { type:"case", caseId }` on every
+message, so the (real or mock) `assistant.sendMessage` only retrieves within that
+case. Entry points: the empty-state `ChatModeChooser` ("داخل قضية"), or any
+deep-link carrying `case`/`doc` (case detail ask-bar, "اسأل عن هذا المستند").
+While locked: `ScopeChips` and `SuggestionCards` are hidden, a `LockedScopeBanner`
+shows the case facts, and "محادثة عامة" on the banner unlocks (resets to the
+default all-office scope). Reopening a `?thread=` conversation is *not* locked.
+
+## 7. Document studio (workflow drafts)
+
+`DocumentStudio` is the full-screen editor that replaces the old inline draft.
+It parses `Draft.body` (`[[field:key]]` tokens) into an editable block/run model:
+- **Review mode** — AI-filled fields are gold chips → click for provenance
+  (`user_answer` / citation) + inline edit; body is read-only.
+- **Edit mode** — text runs become `contentEditable` for free prose editing;
+  fields stay chips. Export always reads from the model, so both modes serialize.
+- **Side panel** — `الحقول` (edit every field, source-linked) and `المساعد`
+  (quick clause tools + mini-chat that streams a clause and inserts it as a new
+  block). Extra blocks are removable.
+- **Export** — "Word" builds an `application/msword` HTML blob and downloads a
+  real `.doc`; "PDF" opens a print window (browser → save as PDF). "حفظ في القضية"
+  calls `api.workflows.saveDraft`. All client-side; no new endpoints.
+It opens automatically when a workflow reaches the draft step, from the draft
+step's "افتح محرّر المستند" button, and from saved drafts in a case's المسودات tab.
