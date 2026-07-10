@@ -102,7 +102,7 @@ export interface Chunk {
 
 export interface Citation {
   id: ID;
-  /** 1-based marker index as shown in the answer: ﴾١﴿ */
+  /** 1-based marker index as shown in the answer: [١] */
   index: number;
   docId: ID;
   docName: string;

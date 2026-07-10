@@ -54,7 +54,7 @@ function FieldPopover({
           className="mb-3 inline-flex items-center gap-2 rounded-pill border border-gold/60 bg-surface px-3 py-1.5 text-label text-ink transition-colors duration-150 hover:bg-[var(--gold-soft)]"
         >
           <span className="font-semibold text-gold">
-            ﴾{toArabicDigits(field.citation.index)}﴿
+            [{toArabicDigits(field.citation.index)}]
           </span>
           {field.citation.docName} — صفحة {field.citation.page}
         </button>

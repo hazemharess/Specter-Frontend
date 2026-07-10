@@ -621,7 +621,7 @@ function FieldPopover({
           className="mb-3 inline-flex items-center gap-2 rounded-pill border border-gold/60 bg-surface px-3 py-1.5 text-label text-ink transition-colors duration-150 hover:bg-[var(--gold-soft)]"
         >
           <span className="font-semibold text-gold">
-            ﴾{toArabicDigits(field.citation.index)}﴿
+            [{toArabicDigits(field.citation.index)}]
           </span>
           {field.citation.docName} — صفحة {field.citation.page}
         </button>
@@ -739,7 +739,7 @@ function StudioSidebar({
                       onClick={() => onCitationClick(f.citation!)}
                       className="inline-flex items-center gap-1 rounded-pill border border-gold/60 px-2 py-0.5 text-[11px] text-gold transition-colors duration-150 hover:bg-[var(--gold-soft)]"
                     >
-                      ﴾{toArabicDigits(f.citation.index)}﴿ مصدر
+                      [{toArabicDigits(f.citation.index)}] مصدر
                     </button>
                   ) : (
                     <span className="text-[11px] text-ink-3">من إجابتك</span>
