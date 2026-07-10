@@ -21,6 +21,15 @@ interface TranscriptTurn {
 /** Voice always asks over the full corpus, same as the default text scope. */
 const VOICE_SCOPE: Scope = { type: "all", label: "كل المصادر" };
 
+/**
+ * ▶ VOICE SPEED KNOB — playback rate for the spoken answer.
+ * 1.0 = normal, 1.15 = ~15% faster, 1.3 = noticeably fast. Sane range 0.8–1.5.
+ * The on-screen dictation is slaved to audio time, so it speeds up in lockstep —
+ * change this one number and BOTH the voice and the text reveal follow.
+ * Overridable at runtime via NEXT_PUBLIC_VOICE_SPEED without editing code.
+ */
+const VOICE_SPEED = Number(process.env.NEXT_PUBLIC_VOICE_SPEED) || 1.20;
+
 /** Immutable update of the last assistant turn. */
 function updateLastAssistant(
   prev: TranscriptTurn[],
@@ -129,6 +138,7 @@ export function VoiceMode({
         .find((v) => v.lang?.toLowerCase().startsWith("ar"));
       u.lang = arVoice?.lang || "ar-EG";
       if (arVoice) u.voice = arVoice;
+      u.rate = VOICE_SPEED; // match the ElevenLabs playback speed knob
       u.onstart = () => {
         setOrbState("speaking");
         // browser word-boundary timing is unreliable → reveal in full
@@ -164,6 +174,9 @@ export function VoiceMode({
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         audioRef.current = audio;
+        // Speed up playback; keep pitch natural. Dictation follows via ontimeupdate.
+        audio.playbackRate = VOICE_SPEED;
+        (audio as any).preservesPitch = true;
         audio.onplay = () => setOrbState("speaking");
         audio.ontimeupdate = () => {
           const d = audio.duration;

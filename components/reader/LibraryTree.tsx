@@ -20,7 +20,7 @@ function TreeBranch({
   selectedDocId: string | null;
   onSelect: (docId: string) => void;
 }) {
-  const [open, setOpen] = useState(depth === 0);
+  const [open, setOpen] = useState(false);
   const reduce = useReducedMotion();
 
   if (node.docId) {
