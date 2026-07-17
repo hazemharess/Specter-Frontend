@@ -545,7 +545,7 @@ function StudioAction({
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded-input px-3 py-1.5 text-label transition-colors duration-150 ${
         primary
-          ? "bg-accent text-white hover:bg-[#16302b]"
+          ? "bg-accent text-white hover:bg-accent-hover"
           : "border border-line bg-surface text-ink-2 hover:bg-accent-soft/40"
       }`}
     >
@@ -644,7 +644,7 @@ function FieldPopover({
             onEdit(value);
             onClose();
           }}
-          className="rounded-input bg-accent px-3 py-1.5 text-label text-white transition-colors duration-150 hover:bg-[#16302b]"
+          className="rounded-input bg-accent px-3 py-1.5 text-label text-white transition-colors duration-150 hover:bg-accent-hover"
         >
           حفظ
         </button>
@@ -838,7 +838,7 @@ function StudioSidebar({
                 onClick={() => chatInput.trim() && onRunPrompt(chatInput.trim())}
                 disabled={!chatInput.trim() || thinking}
                 aria-label="إرسال"
-                className="flex h-8 w-8 items-center justify-center rounded-input bg-accent text-white transition-all duration-150 hover:bg-[#16302b] active:scale-[.96] disabled:opacity-30"
+                className="flex h-8 w-8 items-center justify-center rounded-input bg-accent text-white transition-all duration-150 hover:bg-accent-hover active:scale-[.96] disabled:opacity-30"
               >
                 <Send className="h-4 w-4" strokeWidth={1.5} />
               </button>

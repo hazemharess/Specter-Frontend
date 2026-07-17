@@ -522,7 +522,7 @@ export function VoiceMode({
         <button
           onClick={finish}
           aria-label="إنهاء الجلسة الصوتية"
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-white transition-colors duration-150 hover:bg-[#16302b]"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-white transition-colors duration-150 hover:bg-accent-hover"
         >
           <X className="h-[18px] w-[18px]" strokeWidth={1.5} />
         </button>

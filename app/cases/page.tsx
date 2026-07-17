@@ -46,7 +46,7 @@ export default function CasesPage() {
             className="w-full rounded-input border border-line bg-surface py-2 pl-3 pr-9 text-body text-ink placeholder:text-ink-3 focus:outline-none focus-visible:outline-2 focus-visible:outline-accent"
           />
         </div>
-        <button className="inline-flex items-center gap-2 rounded-pill bg-accent px-4 py-2 text-body font-medium text-white transition-colors duration-150 hover:bg-[#16302b] active:scale-[.98]">
+        <button className="inline-flex items-center gap-2 rounded-pill bg-accent px-4 py-2 text-body font-medium text-white transition-colors duration-150 hover:bg-accent-hover active:scale-[.98]">
           قضية جديدة
           <Plus className="h-4 w-4" strokeWidth={1.5} />
         </button>

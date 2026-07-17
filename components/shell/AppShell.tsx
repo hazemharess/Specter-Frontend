@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Menu, Scale } from "lucide-react";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { ProactiveNotification } from "@/components/agent/ProactiveNotification";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -27,6 +28,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       <main className="min-h-screen md:mr-16 xl:mr-60">{children}</main>
+
+      <ProactiveNotification />
     </div>
   );
 }

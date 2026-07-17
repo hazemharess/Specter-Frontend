@@ -1,9 +1,14 @@
 "use client";
 
 import { Info } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import type { Citation, Message } from "@/lib/types";
 import { MessageContent, toArabicDigits } from "@/components/chat/MessageContent";
 import { ReasoningSteps } from "@/components/chat/ReasoningSteps";
+import { PlanCard } from "@/components/agent/PlanCard";
+import { ExecutionTimeline } from "@/components/agent/ExecutionTimeline";
+import { TaskListArtifact } from "@/components/agent/TaskListArtifact";
+import { CaseSummaryArtifact } from "@/components/agent/CaseSummaryArtifact";
 
 /** Pull the article number out of a citation snippet ("مادة N …") for display. */
 function articleLabel(snippet: string): string | null {
@@ -49,6 +54,7 @@ export function MessageItem({
   streaming,
   working,
   onCitationClick,
+  onApprovePlan,
 }: {
   message: Message;
   /** true while this assistant message's tokens are still arriving */
@@ -56,7 +62,11 @@ export function MessageItem({
   /** true while reasoning steps are still arriving (before first token) */
   working?: boolean;
   onCitationClick: (c: Citation) => void;
+  /** approve the plan this message recommends (agentic flow) */
+  onApprovePlan?: (message: Message) => void;
 }) {
+  const reduce = useReducedMotion();
+
   if (message.role === "user") {
     return (
       <div className="flex justify-start">
@@ -66,6 +76,8 @@ export function MessageItem({
       </div>
     );
   }
+
+  const planStatus = message.planStatus ?? "recommended";
 
   return (
     <div>
@@ -87,7 +99,40 @@ export function MessageItem({
           onCitationClick={onCitationClick}
         />
       )}
-      {!streaming && !working && (
+
+      {/* recommended plan → approve → execute → deliver, inline on the message */}
+      {message.plan && (
+        <div className="mt-4 space-y-4">
+          {planStatus === "recommended" ? (
+            <PlanCard plan={message.plan} onApprove={() => onApprovePlan?.(message)} />
+          ) : (
+            <>
+              <ExecutionTimeline
+                plan={message.plan}
+                executedStepIds={message.executedStepIds ?? []}
+                activeStepId={message.activeStepId ?? null}
+                done={planStatus === "delivered"}
+              />
+              {(message.artifacts ?? []).map((artifact) => (
+                <motion.div
+                  key={artifact.id}
+                  initial={reduce ? false : { opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                >
+                  {artifact.kind === "task_list" ? (
+                    <TaskListArtifact data={artifact} />
+                  ) : (
+                    <CaseSummaryArtifact data={artifact} />
+                  )}
+                </motion.div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {!streaming && !working && !message.plan && (
         <SourcesRow citations={message.citations} onCitationClick={onCitationClick} />
       )}
     </div>

@@ -18,6 +18,7 @@ import { VoiceMode } from "@/components/orb/VoiceMode";
 import { Spinner } from "@/components/ui";
 
 const DEFAULT_SCOPE: Scope = { type: "all", label: "كل مستندات المكتب" };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function caseLockInfo(c: Case): LockInfo {
   return {
@@ -96,6 +97,10 @@ export function ChatView({
   const scrollDown = () =>
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
 
+  const patchMessage = useCallback((id: string, patch: Partial<Message>) => {
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  }, []);
+
   const send = useCallback(
     async (text: string) => {
       if (busyRef.current) return;
@@ -126,6 +131,36 @@ export function ChatView({
       setStreaming(false);
       requestAnimationFrame(scrollDown);
 
+      // route: an executable request gets a recommended plan; anything else is
+      // answered normally. LIVE, the assistant stream itself decides (§2/§8).
+      const rec = await api.agent.recommend({ content: text, scope });
+
+      if (rec.intent === "plan") {
+        let acc = draft;
+        for (const step of rec.reasoning) {
+          acc = { ...acc, reasoningSteps: [...acc.reasoningSteps, step] };
+          setLive({ ...acc });
+          requestAnimationFrame(scrollDown);
+          await sleep(450);
+        }
+        const planMsg: Message = {
+          ...acc,
+          content: rec.lead,
+          plan: rec.plan,
+          planStatus: "recommended",
+          executedStepIds: [],
+          activeStepId: null,
+          artifacts: [],
+        };
+        setMessages((prev) => [...prev, planMsg]);
+        setLive(null);
+        setWorking(false);
+        requestAnimationFrame(scrollDown);
+        busyRef.current = false;
+        return;
+      }
+
+      // informational answer — cited streaming Q&A
       let acc = draft;
       for await (const ev of api.assistant.sendMessage({ scope, content: text })) {
         if (ev.type === "reasoning_step") {
@@ -143,6 +178,10 @@ export function ChatView({
         } else if (ev.type === "citation") {
           acc = { ...acc, citations: [...acc.citations, ev.citation] };
           setLive(acc);
+        } else if (ev.type === "plan") {
+          // the live backend can recommend a plan mid-stream instead of prose
+          acc = { ...acc, content: ev.lead, plan: ev.plan, planStatus: "recommended" };
+          setLive(acc);
         } else if (ev.type === "done") {
           acc = { ...ev.message, id: acc.id, reasoningSteps: acc.reasoningSteps };
           setMessages((prev) => [...prev, acc]);
@@ -154,6 +193,54 @@ export function ChatView({
       busyRef.current = false;
     },
     [scope, initialThreadId]
+  );
+
+  // approve a recommended plan → execute it → deliver artifacts, all inline on
+  // the assistant message that proposed it
+  const approvePlan = useCallback(
+    async (msg: Message) => {
+      if (!msg.plan) return;
+      const plan = msg.plan;
+      patchMessage(msg.id, {
+        planStatus: "executing",
+        executedStepIds: [],
+        activeStepId: null,
+        artifacts: [],
+      });
+      requestAnimationFrame(scrollDown);
+
+      for await (const ev of api.agent.executePlan(plan)) {
+        if (ev.type === "step_start") {
+          patchMessage(msg.id, { activeStepId: ev.stepId });
+        } else if (ev.type === "step_done") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === msg.id
+                ? {
+                    ...m,
+                    executedStepIds: [...(m.executedStepIds ?? []), ev.stepId],
+                    activeStepId: null,
+                  }
+                : m
+            )
+          );
+          requestAnimationFrame(scrollDown);
+        } else if (ev.type === "artifact") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === msg.id
+                ? { ...m, artifacts: [...(m.artifacts ?? []), ev.artifact] }
+                : m
+            )
+          );
+          requestAnimationFrame(scrollDown);
+        } else if (ev.type === "done") {
+          patchMessage(msg.id, { planStatus: "delivered", activeStepId: null });
+          requestAnimationFrame(scrollDown);
+        }
+      }
+    },
+    [patchMessage]
   );
 
   // pre-filled question from a case page / suggestion deep link
@@ -229,6 +316,7 @@ export function ChatView({
                     key={m.id}
                     message={m}
                     onCitationClick={setActiveCitation}
+                    onApprovePlan={approvePlan}
                   />
                 ))}
                 {live && (

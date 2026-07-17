@@ -3,17 +3,43 @@
 @tailwind utilities;
 
 :root {
-  --bg: #fafaf8;
+  /* Monotone / Legora. Change VALUES here to restyle the whole app — never the names. */
+
+  /* Canvas & surfaces (warm-neutral, desaturated) */
+  --bg: #f6f5f3;
   --surface: #ffffff;
-  --border: #e8e6e1;
-  --text-primary: #1a1915;
-  --text-secondary: #6b6860;
-  --text-tertiary: #9c9890;
-  --accent: #1e3a34;
-  --accent-soft: #eaf0ee;
+  --surface-2: #f1f0ed;
+  --surface-3: #e8e7e3;
+  --overlay-glass: rgba(247, 246, 244, 0.72);
+
+  /* Borders */
+  --border: #e6e5e1;
+  --border-strong: #d6d4cf;
+
+  /* Ink — neutral, near-black */
+  --text-primary: #191919;
+  --text-secondary: #6b6a67;
+  --text-tertiary: #9b9a96;
+
+  /* Accent = monochrome signature (near-black). Optional brand whisper: #14231D */
+  --accent: #1a1a1a;
+  --accent-hover: #000000;
+  --accent-soft: #eeedea;
+  --accent-contrast: #ffffff;
+
+  /* Functional highlight — the ONE warm accent, citations only */
   --gold: #b8935a;
-  --gold-soft: rgba(184, 147, 90, 0.12);
+  --gold-soft: rgba(184, 147, 90, 0.14);
+
+  /* Status — color lives in the icon/dot, not the pill */
+  --status-done: #3f8f5b;
+  --status-review: #b7863c;
+  --status-pending: #9b9a96;
   --danger: #b4462e;
+
+  /* Neutral pill surface */
+  --pill-bg: #f0efec;
+  --pill-text: #4a4a47;
 }
 
 html {

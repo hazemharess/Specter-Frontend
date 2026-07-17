@@ -64,7 +64,7 @@ export function ChatInput({
           aria-label="إرسال"
           onClick={send}
           disabled={!value.trim() || disabled}
-          className="flex h-9 w-9 items-center justify-center rounded-input bg-accent text-white transition-all duration-150 hover:bg-[#16302b] active:scale-[.96] disabled:opacity-30"
+          className="flex h-9 w-9 items-center justify-center rounded-input bg-accent text-white transition-all duration-150 hover:bg-accent-hover active:scale-[.96] disabled:opacity-30"
         >
           <ArrowUp className="h-[18px] w-[18px]" strokeWidth={1.5} />
         </button>

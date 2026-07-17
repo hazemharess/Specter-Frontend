@@ -16,7 +16,9 @@ JSON bodies, base URL from `NEXT_PUBLIC_API_BASE_URL`.
 
 | Mock function | Real endpoint | Method | Request | Response | Streams |
 |---|---|---|---|---|---|
-| `api.assistant.sendMessage({threadId?, scope, content})` | `/api/v1/assistant/messages` | POST | `{ threadId?: string, scope: Scope, content: string }` | SSE stream of `AssistantStreamEvent` | **yes (SSE)** |
+| `api.assistant.sendMessage({threadId?, scope, content})` | `/api/v1/assistant/messages` | POST | `{ threadId?: string, scope: Scope, content: string }` | SSE stream of `AssistantStreamEvent` (may emit `plan`, §8) | **yes (SSE)** |
+| `api.agent.recommend({content, scope})` | *(folds into `sendMessage` — §8)* | — | `PlanRequest` | `AgentRecommendation` | no |
+| `api.agent.executePlan(plan)` | `/api/v1/agent/plans/:id/execute` | POST | `{ plan }` (or `:id`) | SSE stream of `PlanExecutionEvent` | **yes (SSE)** |
 | `api.assistant.getThread(id)` | `/api/v1/threads/:id` | GET | — | `Thread` (messages newest-last) | no |
 | `api.assistant.listThreads(caseId?)` | `/api/v1/threads?caseId=` | GET | query params | `Paginated<Thread>` (messages omitted) | no |
 | `api.cases.list(query?)` | `/api/v1/cases?query=&page=&pageSize=` | GET | query params | `Paginated<Case>` | no |
@@ -50,8 +52,12 @@ receive plain arrays and stay untouched).
 adapter must yield the same discriminated union in the same order:
 
 ```
-reasoning_step*  →  reasoning_done  →  token*  →  citation*  →  done
+reasoning_step*  →  reasoning_done  →  ( token* → citation*  |  plan )  →  done
 ```
+
+The branch is the model's call: an informational question streams `token*`/
+`citation*` (prose answer); an **executable request** streams a single `plan`
+event instead (a recommended plan, no prose) — see §8 for the full agent loop.
 
 SSE wire format (event name = union tag, data = JSON payload):
 
@@ -75,11 +81,28 @@ event: done
 data: {"message":{ …full Message object, persisted server-side… }}
 ```
 
+Executable-request variant — `plan` replaces the `token`/`citation` run:
+
+```
+event: reasoning_step
+data: {"step":{"id":"pr-2","kind":"search","label":"مطابقة المهارة المناسبة من مهارات المكتب","detail":"المهارة: صياغة المحررات"}}
+
+event: reasoning_done
+data: {"stepCount":3}
+
+event: plan
+data: {"lead":"يمكنني تنفيذ ذلك ضمن مهارة «صياغة المحررات». أعددتُ خطة مقترحة — راجع الخطوات واعتمدها للبدء.","plan":{ …full Plan object, §8… }}
+
+event: done
+data: {"message":{ …Message with plan + planStatus:"recommended"… }}
+```
+
 UI behavior tied to this sequence (do not reorder):
 
 - Each `reasoning_step` appends a step to the "جارٍ العمل…" block (400ms UI stagger).
 - The **first `token`** collapses the reasoning block to its summary line and starts word-by-word rendering. Token text must include inline `[cite:N]` markers where citations belong.
 - `citation` events bind marker `N` → `Citation`; markers rendered before their citation arrives are inert until bound.
+- `plan` renders a **plan card** on the message (`lead` as the short intro above it) with an "اعتماد الخطة" button. Nothing executes until the lawyer approves — approval calls `executePlan` (§8). Mutually exclusive with `token`/`citation` in one message.
 - `done` carries the final materialized `Message` (authoritative content + citations + `isRefusal`). The UI replaces its accumulated state with it.
 - Refusals are normal `done` messages with `isRefusal: true` — never an HTTP error.
 
@@ -197,14 +220,138 @@ uploading → ocr → indexing → ready
 ## 7. Swap checklist (mock → real)
 
 1. Add `NEXT_PUBLIC_API_BASE_URL` (+ auth token plumbing) to `.env`.
-2. `lib/api/assistant.ts` — replace generator internals with the SSE adapter (§2).
-3. `lib/api/cases.ts` — fetch + unwrap `Paginated`.
-4. `lib/api/workflows.ts` — runs/PATCH/generate + real multipart upload (§4, §6).
-5. `lib/api/library.ts` — fetch; point `getContent` at the content endpoint (§3).
-6. `lib/api/history.ts` — fetch.
-7. `lib/api/voice.ts` — websocket adapter yielding `VoiceTranscriptEvent` (§5).
-8. Delete `/lib/data/` once nothing imports it.
+2. `lib/api/assistant.ts` — replace generator internals with the SSE adapter (§2); handle the `plan` event (§8).
+3. `lib/api/agent.ts` — fold `recommend` into the assistant stream; point `executePlan` at the real execute SSE (§8).
+4. `lib/api/cases.ts` — fetch + unwrap `Paginated`.
+5. `lib/api/workflows.ts` — runs/PATCH/generate + real multipart upload (§4, §6).
+6. `lib/api/library.ts` — fetch; point `getContent` at the content endpoint (§3).
+7. `lib/api/history.ts` — fetch.
+8. `lib/api/voice.ts` — websocket adapter yielding `VoiceTranscriptEvent` (§5).
+9. Delete `/lib/data/` once nothing imports it.
 
-That is the whole surface: 6 API modules + 1 env var. If integration wants
+That is the whole surface: 7 API modules + 1 env var. If integration wants
 to touch a component, the architecture contract has been violated — fix the
 API module instead.
+
+---
+
+## 8. Agent layer: plan → approve → execute → deliver
+
+The product's core loop. It is **not** a separate mode, page, or nav
+destination — it is how the assistant answers **executable** requests. Reading
+the plane straight:
+
+- **Informational** request ("ما حكم المادة ٢١٥؟", "هل يجوز…") → normal cited
+  answer (§2, `token`/`citation`).
+- **Executable** request ("صِغ إنذارًا", "أعدّ مذكرة تقييم", "قارن العقدين") →
+  the assistant reaches into the firm's **skills** (its "mind"), matches one,
+  and **recommends a plan** the lawyer must approve before anything runs. On
+  approval the plan executes step by step and produces real **artifacts**
+  (task list, assessment memo) inline on the same message.
+
+### 8.1 Who decides (routing)
+
+The decision belongs to the model. Tonight it is a client-side keyword pass:
+`classifyIntent()` in `lib/data/agent.ts` (verbs like صِغ/أعدّ/قارن/لخّص →
+plan). `api.agent.recommend()` returns an `AgentRecommendation`
+(`{intent:"answer"}` or `{intent:"plan", lead, reasoning, plan}`).
+
+**LIVE, `recommend` disappears.** The assistant stream itself decides and emits
+a `plan` event (§2) instead of tokens. `ChatView.send()` already handles that
+event, so wiring the real backend means: keep streaming, and when the model
+chooses to act, send `plan` + a `done` message carrying
+`plan` + `planStatus:"recommended"`. Delete the client `recommend` shim.
+
+### 8.2 Skills = the assistant's mind (backend-owned)
+
+A **skill** is a firm-authored, reusable capability (e.g. "صياغة المحررات",
+"تقييم القضايا"). It is the unit the firm tunes; it is what the model draws on
+to build a plan. Skills are surfaced to the user **only** as the `capability`
+label on a recommended plan card — never as a browsable list that competes with
+Workflows (§4). Model:
+
+```
+skill = { id, title, capability, description, promptTemplate, tools[], firmId }
+```
+
+Suggested endpoints (registry is backend-owned, like workflow definitions):
+
+- `GET  /api/v1/skills` → `Skill[]` (firm-scoped) — powers a future skill studio, not a nav page.
+- `POST /api/v1/skills` / `PATCH …/:id` — author/tune a skill.
+
+Retrieval-time, the model selects a skill and instantiates a `Plan` from it. A
+`Plan` carries `capability` (which skill produced it) so the UI can show
+"مهارة: …" on the card. **Skills ≠ Workflows.** Workflows (§4) are explicit,
+user-driven, form-filling document pipelines; skills are implicit capabilities
+the agent invokes autonomously when it recommends a plan.
+
+### 8.3 Plan shape
+
+`Plan` (see `lib/types.ts`) — `id`, `title`, `capability?`, `goal`,
+`steps: PlanStep[]`, `expectedArtifacts: ArtifactKind[]`. Each `PlanStep` has an
+`id`, `title`, optional `tool` (`rag_search | case_lookup | document_extract |
+draft | summarize`) + `toolLabel`, and `estimatedSeconds` (paces the UI only —
+the backend's real step boundaries drive it live).
+
+### 8.4 Execute stream
+
+`api.agent.executePlan(plan)` is an async generator of `PlanExecutionEvent`,
+consumed exactly like the assistant stream. Approval (the "اعتماد الخطة" click)
+triggers it; `ChatView.approvePlan()` mutates the recommending message in place.
+
+```
+POST /api/v1/agent/plans/:id/execute   (Accept: text/event-stream)
+
+step_start*  →  step_done*  →  artifact*  →  done
+```
+
+Wire format:
+
+```
+event: step_start
+data: {"stepId":"s1"}
+
+event: step_done
+data: {"stepId":"s1"}
+
+event: artifact
+data: {"artifact":{ …Artifact — see 8.5… }}
+
+event: done
+data: {}
+```
+
+UI binding (do not reorder): `step_start` marks a step active (spinner);
+`step_done` flips it to a green check and appends to `executedStepIds`;
+`artifact` appends a deliverable; `done` sets `planStatus:"delivered"`. Steps
+interleave `step_start`/`step_done` sequentially — one active step at a time.
+Approval-before-execution is a hard product rule: the execute endpoint must
+never run without an explicit approve call.
+
+### 8.5 Artifacts (deliverables)
+
+`Artifact` is a discriminated union (`kind`), rendered by dedicated components
+and **persisted** so they live in the case file, not just the chat:
+
+- `task_list` → `TaskListArtifactData { tasks: TaskItem[] }`. `TaskItem` =
+  `{ id, title, status: "done"|"review"|"pending"|"blocked", assignee:
+  "lawyer"|"client", assigneeName? }`. The checkbox toggle is client-side today;
+  live it should `PATCH /api/v1/artifacts/:id/tasks/:taskId {status}` so the
+  firm and client share one source of truth. "مشاركة مع الموكل" / "تصدير" are
+  stubs — wire to the client portal + export endpoints when they exist.
+- `case_summary` → `CaseSummaryArtifactData { summary, facts[], sections[], meta? }`,
+  an assessment memo. Its `sections`/`facts` should carry the same `[cite:N]` +
+  `Citation` provenance as answers (§3) once retrieval-backed.
+
+Persistence: `POST /api/v1/agent/artifacts` on `done`, linked to
+`{ threadId, messageId, caseId }`. `GET /api/v1/cases/:id/artifacts` to list
+them on the case. The mock materializes fixed artifacts in `lib/data/agent.ts`
+(`artifactsFor(plan)`); replace with the model's real output — shapes unchanged.
+
+### 8.6 Swap summary
+
+`recommend` → folded into the assistant `plan` event. `executePlan` → the
+execute SSE above. `classifyIntent`/`selectPlan`/`artifactsFor` (in
+`lib/data/agent.ts`) are the mock's brain and are deleted with `/lib/data/`.
+No component changes — `Plan`, `PlanExecutionEvent`, and `Artifact` in
+`lib/types.ts` are the contract.

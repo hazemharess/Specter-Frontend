@@ -22,7 +22,7 @@ export const Button = forwardRef<
     "inline-flex items-center justify-center gap-2 text-body font-medium transition-colors duration-150 disabled:opacity-40 disabled:pointer-events-none active:scale-[.98]";
   const shape = pill ? "rounded-pill px-5 py-2" : "rounded-input px-4 py-2";
   const variants: Record<ButtonVariant, string> = {
-    primary: "bg-accent text-white hover:bg-[#16302b]",
+    primary: "bg-accent text-white hover:bg-accent-hover",
     ghost: "bg-transparent text-ink-2 hover:bg-accent-soft/40 hover:text-ink",
     outline:
       "border border-line bg-surface text-ink hover:bg-accent-soft/40",

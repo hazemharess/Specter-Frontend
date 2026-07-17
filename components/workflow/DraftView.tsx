@@ -77,7 +77,7 @@ function FieldPopover({
             onEdit(value);
             onClose();
           }}
-          className="rounded-input bg-accent px-3 py-1.5 text-label text-white transition-colors duration-150 hover:bg-[#16302b]"
+          className="rounded-input bg-accent px-3 py-1.5 text-label text-white transition-colors duration-150 hover:bg-accent-hover"
         >
           حفظ
         </button>

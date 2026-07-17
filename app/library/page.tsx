@@ -155,7 +155,7 @@ function LibraryScreen() {
                 {/* docked ask button */}
                 <button
                   onClick={() => router.push(`/?doc=${docId}`)}
-                  className="fixed bottom-6 left-6 z-20 inline-flex items-center gap-2 rounded-pill bg-accent px-5 py-2.5 text-body font-medium text-white shadow-floating transition-colors duration-150 hover:bg-[#16302b] active:scale-[.98]"
+                  className="fixed bottom-6 left-6 z-20 inline-flex items-center gap-2 rounded-pill bg-accent px-5 py-2.5 text-body font-medium text-white shadow-floating transition-colors duration-150 hover:bg-accent-hover active:scale-[.98]"
                 >
                   <MessageSquareText className="h-4 w-4" strokeWidth={1.5} />
                   اسأل عن هذا المستند

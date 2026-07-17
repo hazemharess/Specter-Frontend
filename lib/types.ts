@@ -135,13 +135,27 @@ export interface Message {
   id: ID;
   threadId: ID;
   role: MessageRole;
-  /** answer text; citation markers are encoded as [cite:N] inline */
+  /** answer text; citation markers are encoded as [cite:N] inline. For a plan
+   *  recommendation this is the short lead ("يمكنني تنفيذ ذلك…"). */
   content: string;
   reasoningSteps: ReasoningStep[];
   citations: Citation[];
   /** true when the answer is an explicit "not found in the sources" */
   isRefusal?: boolean;
   createdAt: string;
+
+  // --- agentic (present only when the assistant recommends an executable
+  //     plan instead of a plain answer; see the agent section below) ---
+  /** the recommended plan, rendered as a plan card on this message */
+  plan?: Plan;
+  /** lifecycle of that plan within the conversation */
+  planStatus?: PlanStatus;
+  /** ids of steps that have finished executing (drives the timeline) */
+  executedStepIds?: ID[];
+  /** the step currently running, if any */
+  activeStepId?: ID | null;
+  /** deliverables produced once execution completes */
+  artifacts?: Artifact[];
 }
 
 export type ScopeType = "all" | "case" | "library" | "templates" | "document";
@@ -175,7 +189,111 @@ export type AssistantStreamEvent =
   | { type: "reasoning_done"; stepCount: number }
   | { type: "token"; text: string }
   | { type: "citation"; citation: Citation }
+  // emitted INSTEAD OF tokens when the model decides the request is executable:
+  // the answer is a recommended plan, not prose. `lead` is the short intro
+  // shown above the plan card. Approval then triggers api.agent.executePlan.
+  | { type: "plan"; lead: string; plan: Plan }
   | { type: "done"; message: Message };
+
+// ---------------------------------------------------------------- agent
+// The plan → approve → execute → deliver loop. Same discriminated-union SSE
+// pattern as the assistant: the mock layer and a real Hermes backend yield the
+// identical shapes. See lib/api/agent.ts and docs/BACKEND-INTEGRATION.md.
+
+export type AgentTool =
+  | "rag_search"
+  | "case_lookup"
+  | "document_extract"
+  | "draft"
+  | "summarize";
+
+export interface PlanStep {
+  id: ID;
+  title: string;
+  description?: string;
+  tool?: AgentTool;
+  /** human label for the tool chip, e.g. "المكتبة القانونية" */
+  toolLabel?: string;
+  /** rough duration; paces the execution animation only */
+  estimatedSeconds?: number;
+}
+
+export type ArtifactKind = "task_list" | "case_summary" | "timeline" | "memo";
+
+export interface Plan {
+  id: ID;
+  title: string;
+  goal: string;
+  /** the firm skill this plan is drawn from — the assistant's "mind"; shown on
+   *  the card so the lawyer sees which capability was matched */
+  capability?: string;
+  steps: PlanStep[];
+  expectedArtifacts: ArtifactKind[];
+}
+
+/** Lifecycle of a recommended plan inside a conversation. */
+export type PlanStatus = "recommended" | "executing" | "delivered";
+
+export interface PlanRequest {
+  content: string;
+  scope: Scope;
+}
+
+/**
+ * The assistant's routing decision for one message. Informational questions
+ * are answered normally (see AssistantStreamEvent); an executable request is
+ * met with a recommended plan the lawyer approves before anything runs.
+ *
+ * TONIGHT this is decided client-side by keyword. LIVE, the model decides and
+ * the assistant stream simply emits a `plan` event instead of tokens (§2/§8).
+ */
+export type AgentRecommendation =
+  | { intent: "answer" }
+  | { intent: "plan"; lead: string; reasoning: ReasoningStep[]; plan: Plan };
+
+// --- artifacts (real work product the agent delivers) ---
+
+export type TaskStatus = "done" | "review" | "pending" | "blocked";
+export type TaskAssignee = "lawyer" | "client";
+
+export interface TaskItem {
+  id: ID;
+  title: string;
+  status: TaskStatus;
+  assignee: TaskAssignee;
+  assigneeName?: string;
+}
+
+export interface TaskListArtifactData {
+  kind: "task_list";
+  id: ID;
+  title: string;
+  tasks: TaskItem[];
+}
+
+export interface CaseSummaryArtifactData {
+  kind: "case_summary";
+  id: ID;
+  title: string;
+  /** short lead paragraph */
+  summary: string;
+  facts: { label: string; value: string }[];
+  /** header meta, e.g. "٤ صفحات · ١٢ استشهاد" */
+  meta?: string;
+  sections?: { heading: string; body: string }[];
+}
+
+export type Artifact = TaskListArtifactData | CaseSummaryArtifactData;
+
+/**
+ * Streaming events yielded by api.agent.executePlan(): each step starts and
+ * completes, then artifacts are delivered, then done.
+ */
+export type PlanExecutionEvent =
+  | { type: "step_start"; stepId: ID }
+  | { type: "step_done"; stepId: ID }
+  | { type: "artifact"; artifact: Artifact }
+  | { type: "done" };
 
 // ---------------------------------------------------------------- workflows
 

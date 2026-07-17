@@ -53,7 +53,7 @@ export function Sidebar({
             router.push(`/?new=${Date.now()}`);
             onCloseMobile();
           }}
-          className="flex w-full items-center justify-center gap-2 rounded-pill bg-accent px-4 py-2.5 text-body font-medium text-white transition-colors duration-150 hover:bg-[#16302b] active:scale-[.98]"
+          className="flex w-full items-center justify-center gap-2 rounded-pill bg-accent px-4 py-2.5 text-body font-medium text-white transition-colors duration-150 hover:bg-accent-hover active:scale-[.98]"
         >
           <Plus className="h-4 w-4" strokeWidth={1.5} />
           <span className="md:max-xl:hidden">محادثة جديدة</span>
