@@ -41,6 +41,26 @@ export interface Case {
   team: string[];
   createdAt: string;
   updatedAt: string;
+  // ---- backend-only fields (present on cases coming from Hermes) --------
+  /** where the case originated — "telegram" cases flash in when they land */
+  source?: "telegram" | "ui";
+  priority?: "normal" | "urgent" | "high";
+  /** raw case_type from the backend, shown verbatim when set */
+  caseType?: string | null;
+  assignedLawyer?: string | null;
+}
+
+/** A case attachment as returned by GET /api/cases/:id. `file_path` is a
+ *  server-side path and is intentionally not exposed to the browser. */
+export interface CaseAttachment {
+  id: ID;
+  filename: string;
+  mimeType: string | null;
+  uploadedAt: string;
+}
+
+export interface CaseDetail extends Case {
+  attachments: CaseAttachment[];
 }
 
 export interface CaseSession {

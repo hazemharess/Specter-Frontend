@@ -10,10 +10,12 @@ import {
   ChevronLeft,
   FileText,
   MessageSquareText,
+  Paperclip,
   PenLine,
+  Send,
 } from "lucide-react";
 import type {
-  Case,
+  CaseDetail,
   CaseSession,
   Draft,
   LegalDocument,
@@ -23,7 +25,7 @@ import { api } from "@/lib/api";
 import { Badge, Spinner, formatDateAr, relativeTime } from "@/components/ui";
 import { DocumentStudio } from "@/components/workflow/DocumentStudio";
 
-const TABS = ["المحادثات", "المستندات", "المسودات", "الجلسات"] as const;
+const TABS = ["المرفقات", "المحادثات", "المستندات", "المسودات", "الجلسات"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function CaseDetailPage() {
@@ -31,12 +33,12 @@ export default function CaseDetailPage() {
   const router = useRouter();
   const reduce = useReducedMotion();
 
-  const [caseData, setCaseData] = useState<Case | null>(null);
+  const [caseData, setCaseData] = useState<CaseDetail | null>(null);
   const [docs, setDocs] = useState<LegalDocument[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [sessions, setSessions] = useState<CaseSession[]>([]);
-  const [tab, setTab] = useState<Tab>("المحادثات");
+  const [tab, setTab] = useState<Tab>("المرفقات");
   const [ask, setAsk] = useState("");
   const [loading, setLoading] = useState(true);
   const [openDraft, setOpenDraft] = useState<Draft | null>(null);
@@ -65,12 +67,13 @@ export default function CaseDetailPage() {
 
   const counts = useMemo<Record<Tab, number>>(
     () => ({
+      المرفقات: caseData?.attachments.length ?? 0,
       المحادثات: threads.length,
       المستندات: docs.length,
       المسودات: drafts.length,
       الجلسات: sessions.length,
     }),
-    [threads, docs, drafts, sessions]
+    [caseData, threads, docs, drafts, sessions]
   );
 
   const submitAsk = () => {
@@ -108,29 +111,47 @@ export default function CaseDetailPage() {
       <div className="mb-2 flex flex-wrap items-center gap-3">
         <h1 className="text-page font-semibold text-ink">{caseData.title}</h1>
         <Badge tone="green">{caseData.status}</Badge>
+        {caseData.caseType && <Badge tone="blue">{caseData.caseType}</Badge>}
+        {(caseData.priority === "urgent" || caseData.priority === "high") && (
+          <span className="rounded-pill bg-danger px-2.5 py-0.5 text-label font-medium text-white">
+            عاجل
+          </span>
+        )}
+        {caseData.source === "telegram" && (
+          <span className="inline-flex items-center gap-1 rounded-pill bg-[#229ED9] px-2.5 py-0.5 text-label font-medium text-white">
+            <Send className="h-3 w-3" strokeWidth={2} />
+            أُنشئت عبر Telegram
+          </span>
+        )}
       </div>
 
       <dl className="mb-10 flex flex-wrap gap-x-8 gap-y-2 text-label text-ink-2">
         <div>
-          <dt className="inline text-ink-3">المحكمة: </dt>
-          <dd className="inline">{caseData.court}</dd>
-        </div>
-        <div>
           <dt className="inline text-ink-3">الموكل: </dt>
           <dd className="inline">{caseData.client}</dd>
         </div>
-        <div>
-          <dt className="inline text-ink-3">الخصم: </dt>
-          <dd className="inline">{caseData.opponent}</dd>
-        </div>
-        {caseData.nextSessionDate && (
+        {caseData.assignedLawyer && (
           <div>
-            <dt className="inline text-ink-3">الجلسة القادمة: </dt>
-            <dd className="inline font-medium text-ink">
-              {formatDateAr(caseData.nextSessionDate)}
-            </dd>
+            <dt className="inline text-ink-3">المحامي المسؤول: </dt>
+            <dd className="inline">{caseData.assignedLawyer}</dd>
           </div>
         )}
+        {caseData.court !== "—" && (
+          <div>
+            <dt className="inline text-ink-3">المحكمة: </dt>
+            <dd className="inline">{caseData.court}</dd>
+          </div>
+        )}
+        {caseData.opponent !== "—" && (
+          <div>
+            <dt className="inline text-ink-3">الخصم: </dt>
+            <dd className="inline">{caseData.opponent}</dd>
+          </div>
+        )}
+        <div>
+          <dt className="inline text-ink-3">أُنشئت: </dt>
+          <dd className="inline">{formatDateAr(caseData.createdAt)}</dd>
+        </div>
       </dl>
 
       {/* tabs */}
@@ -158,6 +179,32 @@ export default function CaseDetailPage() {
       </div>
 
       {/* tab bodies */}
+      {tab === "المرفقات" && (
+        <ul className="space-y-2">
+          {caseData.attachments.map((a, i) => (
+            <motion.li
+              key={a.id}
+              initial={reduce ? false : { opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: "easeOut", delay: i * 0.04 }}
+              className="flex items-center gap-4 rounded-card border border-line bg-surface px-5 py-4"
+            >
+              <Paperclip className="h-[18px] w-[18px] shrink-0 text-ink-3" strokeWidth={1.5} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-body font-medium text-ink">{a.filename}</span>
+                <span className="mt-0.5 flex items-center gap-3 text-label text-ink-3">
+                  {a.mimeType && <Badge>{a.mimeType}</Badge>}
+                  <span>{formatDateAr(a.uploadedAt)}</span>
+                </span>
+              </span>
+            </motion.li>
+          ))}
+          {caseData.attachments.length === 0 && (
+            <p className="py-12 text-center text-body text-ink-3">لا توجد مرفقات.</p>
+          )}
+        </ul>
+      )}
+
       {tab === "المحادثات" && (
         <ul className="space-y-2">
           {threads.map((t, i) => (
