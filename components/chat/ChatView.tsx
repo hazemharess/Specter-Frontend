@@ -127,31 +127,47 @@ export function ChatView({
       requestAnimationFrame(scrollDown);
 
       let acc = draft;
-      for await (const ev of api.assistant.sendMessage({ scope, content: text })) {
-        if (ev.type === "reasoning_step") {
-          acc = { ...acc, reasoningSteps: [...acc.reasoningSteps, ev.step] };
-          setLive(acc);
-        } else if (ev.type === "reasoning_done") {
-          // collapse happens when the first token lands
-        } else if (ev.type === "token") {
-          if (!acc.content) {
+      try {
+        for await (const ev of api.assistant.sendMessage({ scope, content: text })) {
+          if (ev.type === "reasoning_step") {
+            acc = { ...acc, reasoningSteps: [...acc.reasoningSteps, ev.step] };
+            setLive(acc);
+          } else if (ev.type === "reasoning_done") {
+            // collapse happens when the first token lands
+          } else if (ev.type === "token") {
+            if (!acc.content) {
+              setWorking(false);
+              setStreaming(true);
+            }
+            acc = { ...acc, content: acc.content + ev.text };
+            setLive(acc);
+          } else if (ev.type === "citation") {
+            acc = { ...acc, citations: [...acc.citations, ev.citation] };
+            setLive(acc);
+          } else if (ev.type === "done") {
+            acc = { ...ev.message, id: acc.id, reasoningSteps: acc.reasoningSteps };
+            setMessages((prev) => [...prev, acc]);
+            setLive(null);
             setWorking(false);
-            setStreaming(true);
+            setStreaming(false);
           }
-          acc = { ...acc, content: acc.content + ev.text };
-          setLive(acc);
-        } else if (ev.type === "citation") {
-          acc = { ...acc, citations: [...acc.citations, ev.citation] };
-          setLive(acc);
-        } else if (ev.type === "done") {
-          acc = { ...ev.message, id: acc.id, reasoningSteps: acc.reasoningSteps };
-          setMessages((prev) => [...prev, acc]);
-          setLive(null);
-          setWorking(false);
-          setStreaming(false);
         }
+      } catch {
+        // Backend unreachable / errored — surface a soft message, keep the shell.
+        setMessages((prev) => [
+          ...prev,
+          {
+            ...acc,
+            content: "تعذّر الوصول إلى المساعد. تأكد من تشغيل الخادم وحاول مرة أخرى.",
+            isRefusal: true,
+          },
+        ]);
+        setLive(null);
+        setWorking(false);
+        setStreaming(false);
+      } finally {
+        busyRef.current = false;
       }
-      busyRef.current = false;
     },
     [scope, initialThreadId]
   );
